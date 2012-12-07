@@ -254,8 +254,9 @@ def saver(uid,output_file):
             posts = soup.findAll(attrs={'action-type' : "feed_list_item"})
             if len(posts)>0:
                 for post in posts:
-                    mid  = int(post.get('mid'))
+                    mid  = post.get('mid')
                     if mid:
+                        mid  = int(mid)
                         forward = post.get('isforward')
                         if forward:
                             origin_nick     = clean_content(str(post.find(attrs={'node-type' : "feed_list_originNick"})))
