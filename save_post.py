@@ -12,6 +12,8 @@ try:
     import hashlib
     import json
     import time
+    import rsa
+    import binascii
     from BeautifulSoup import BeautifulSoup
     from optparse import OptionParser
 except ImportError:
@@ -34,9 +36,9 @@ which is:
         sys.exit(1)
 
 __prog__= "weibo_saver"
-__site__= "http://chaous.com"
+__site__= "http://sar4.com"
 __weibo__= "@聂风_"
-__version__="0.1-beta"
+__version__="0.2-beta"
 
 def config_option():
     usage =  "usage: %prog [options] arg \n"
@@ -97,8 +99,8 @@ def murl_to_mid(murl):
     mid = (str(base62_decode(str(murl[::-1][8:12][::-1])))+str(base62_decode(str(murl[::-1][4:8][::-1])))+str(base62_decode(str(murl[::-1][0:4][::-1]))))
     return mid
 
-def get_servertime():
-    servertime_url = 'http://login.sina.com.cn/sso/prelogin.php?entry=weibo&callback=sinaSSOController.preloginCallBack&client=ssologin.js(v1.3.18)'
+def get_servertime(username):
+    servertime_url = 'http://login.sina.com.cn/sso/prelogin.php?entry=sso&callback=sinaSSOController.preloginCallBack&su=%s&rsakt=mod&client=ssologin.js(v1.4.4)' % (username)
     data = urllib2.urlopen(servertime_url).read()
     p = re.compile('\((.*)\)')
     try:
@@ -106,24 +108,27 @@ def get_servertime():
         data = json.loads(json_data)
         servertime = str(data['servertime'])
         nonce = data['nonce']
-        return servertime, nonce
+        pubkey = data['pubkey']
+        rsakv = data['rsakv']
+        return servertime, nonce, pubkey, rsakv
     except:
         print 'Get severtime error!'
         return None
 
-def get_pwd(pwd, servertime, nonce):
-    pwd1 = hashlib.sha1(pwd).hexdigest()
-    pwd2 = hashlib.sha1(pwd1).hexdigest()
-    pwd3_ = pwd2 + servertime + nonce
-    pwd3 = hashlib.sha1(pwd3_).hexdigest()
-    return pwd3
+def get_passwd(pubkey, password, servertime, nonce):
+    rsaPublickey = int(pubkey, 16)
+    key = rsa.PublicKey(rsaPublickey, 65537)
+    message = str(servertime) + '\t' + str(nonce) + '\n' + str(password)
+    passwd = rsa.encrypt(message, key)
+    passwd = binascii.b2a_hex(passwd)
+    return passwd
 
 def get_user(username):
     username_ = urllib.quote(username)
     username = base64.encodestring(username_)[:-1]
     return username
 
-def login(username,pwd,cookie_file):
+def login(username,passwd,cookie_file):
     if os.path.exists(cookie_file):
         try:
             cookie_jar  = cookielib.LWPCookieJar(cookie_file)
@@ -140,11 +145,11 @@ def login(username,pwd,cookie_file):
             print 'Loading cookies success'
             return 1
         else:
-            return do_login(username,pwd,cookie_file)
+            return do_login(username,passwd,cookie_file)
     else:
-        return do_login(username,pwd,cookie_file)
+        return do_login(username,passwd,cookie_file)
 
-def do_login(username,pwd,cookie_file):
+def do_login(username,passwd,cookie_file):
     login_data = {
         'entry': 'weibo',
         'gateway': '1',
@@ -158,9 +163,11 @@ def do_login(username,pwd,cookie_file):
         'service': 'miniblog',
         'servertime': '',
         'nonce': '',
-        'pwencode': 'wsse',
+        'pwencode': 'rsa2',
         'sp': '',
         'encoding': 'UTF-8',
+        'rsakv': '',
+        'prelt': '115',
         'url': 'http://weibo.com/ajaxlogin.php?framelogin=1&callback=parent.sinaSSOController.feedBackUrlCallBack',
         'returntype': 'META'
     }
@@ -171,13 +178,14 @@ def do_login(username,pwd,cookie_file):
     urllib2.install_opener(opener2)
     login_url = 'http://login.sina.com.cn/sso/login.php?client=ssologin.js(v1.3.18)'
     try:
-        servertime, nonce = get_servertime()
+        servertime, nonce, pubkey, rsakv = get_servertime(username)
     except:
         return
     login_data['servertime'] = servertime
     login_data['nonce'] = nonce
+    login_data['rsakv'] = rsakv
     login_data['su'] = get_user(username)
-    login_data['sp'] = get_pwd(pwd, servertime, nonce)
+    login_data['sp'] = get_passwd(pubkey, passwd, servertime, nonce)
     login_data = urllib.urlencode(login_data)
     http_headers = {'User-Agent':'Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/20100101 Firefox/8.0'}
     req_login  = urllib2.Request(
@@ -187,9 +195,9 @@ def do_login(username,pwd,cookie_file):
     )
     result = urllib2.urlopen(req_login)
     text = result.read()
-    p = re.compile('location\.replace\(\'(.*?)\'\)')
+    p = re.compile('location\.replace\(\"(.*?)\"\)')
+    login_url = p.search(text).group(1)
     try:
-        login_url = p.search(text).group(1)
         urllib2.urlopen(login_url)
         print "Login success!"
         cookie_jar2.save(cookie_file,ignore_discard=True, ignore_expires=True)
@@ -292,12 +300,12 @@ def saver(uid,output_file):
 def main():
     config_option()
     username     = opt_main["username"]
-    pwd          = opt_main["password"]
+    passwd          = opt_main["password"]
     uid          = opt_main["uid"]
     cookie_file  = "cookie_file.dat"
     output_file  = "weibo_post_%s.txt" % (uid)
 
-    login_status = login(username,pwd,cookie_file)
+    login_status = login(username,passwd,cookie_file)
 
     # @聂风_ 1259955755
     if login_status:
