@@ -195,7 +195,8 @@ def do_login(username,passwd,cookie_file):
     )
     result = urllib2.urlopen(req_login)
     text = result.read()
-    p = re.compile('location\.replace\(\"(.*?)\"\)')
+    p = re.compile('location\.replace\(\'(.*?)\'\)')
+    print text
     login_url = p.search(text).group(1)
     try:
         urllib2.urlopen(login_url)
